@@ -78,11 +78,11 @@ void PSMoveServiceUpdate()
 
 		if (DataRecord) {
 			SetConsoleTitle(_T("PSMoveService Motion capture: recording"));
-			printf(", Recording on\r\n");
+			printf(", Recording on\r\n\r\n");
 		}
 		else {
 			SetConsoleTitle(_T("PSMoveService Motion capture"));
-			printf(", Recording off\r\n");
+			printf(", Recording off\r\n\r\n");
 		}
 
 		for (int i = 0; i < controllerList.count; i++)
@@ -135,26 +135,26 @@ void PSMoveServiceUpdate()
 
 void ConnectToPSMoveService()
 {
-	if (PSM_Initialize(PSMOVESERVICE_DEFAULT_ADDRESS, PSMOVESERVICE_DEFAULT_PORT, PSM_DEFAULT_TIMEOUT) == PSMResult_Success)
-	{
-		memset(&controllerList, 0, sizeof(PSMControllerList));
-		PSM_GetControllerList(&controllerList, PSM_DEFAULT_TIMEOUT);
-	}
-
 	unsigned int data_stream_flags =
 		PSMControllerDataStreamFlags::PSMStreamFlags_includePositionData |
 		PSMControllerDataStreamFlags::PSMStreamFlags_includePhysicsData |
 		PSMControllerDataStreamFlags::PSMStreamFlags_includeCalibratedSensorData |
 		PSMControllerDataStreamFlags::PSMStreamFlags_includeRawTrackerData;
 
-	for (int i = 0; i < controllerList.count; i++)
+	if (PSM_Initialize(PSMOVESERVICE_DEFAULT_ADDRESS, PSMOVESERVICE_DEFAULT_PORT, PSM_DEFAULT_TIMEOUT) == PSMResult_Success)
 	{
-		if (PSM_AllocateControllerListener(controllerList.controller_id[i]) == PSMResult_Success && PSM_StartControllerDataStream(controllerList.controller_id[i], data_stream_flags, PSM_DEFAULT_TIMEOUT) == PSMResult_Success)
-			PSMConnected = true;
-	}
+		memset(&controllerList, 0, sizeof(PSMControllerList));
+		PSM_GetControllerList(&controllerList, PSM_DEFAULT_TIMEOUT);
 
-	if (PSMConnected)
-		pPSMUpdatethread = new std::thread(PSMoveServiceUpdate);
+		for (int i = 0; i < controllerList.count; i++)
+		{
+			if (PSM_AllocateControllerListener(controllerList.controller_id[i]) == PSMResult_Success && PSM_StartControllerDataStream(controllerList.controller_id[i], data_stream_flags, PSM_DEFAULT_TIMEOUT) == PSMResult_Success)
+				PSMConnected = true;
+		}
+
+		if (PSMConnected)
+			pPSMUpdatethread = new std::thread(PSMoveServiceUpdate);
+	}
 }
 
 int main()
@@ -164,38 +164,26 @@ int main()
 	ConnectToPSMoveService();
 	
 	if (PSMConnected) {
-		printf("PSM connected\r\n");
+		printf("\r\n PSM connected\r\n");
+		
+		Sleep(5000); //Wait PSM initialization
+		
+		printf("\r\n PSM initialization\r\n");
 	} else {
-		printf("PSM not connected\r\n");
+		printf("\r\n PSM not connected\r\n");
 	}
-
-	TCHAR FileName[511] = _T("MotionCapture");
 
 	//_tcscpy(, );
-	TCHAR szTime[15] = { 0 };
-
-	SYSTEMTIME sysTime;
-	GetLocalTime(&sysTime);
-	_stprintf(szTime, _T("_%02d.%02d.%d_%02d.%02d.txt"), sysTime.wDay, sysTime.wMonth, sysTime.wYear,sysTime.wHour, sysTime.wMinute);
-
 	//_tcscat_s(FileName, sizeof(FileName), _T(".txt"));
-	_tcscat_s(FileName, sizeof(FileName), szTime);
-
 	//MessageBox(NULL, FileName, FileName, MB_OK);
 
-	MotionCapture.open(FileName);
-	if (MotionCapture.is_open())
-	{
-		MotionCapture << controllerList.count << std::endl;
-	}
+	//printf("Controllers count = %d\r\n");
 
-	printf("Controllers count = %d\r\n");
+	bool InitWriteFile = false, AllowCloseFile = false;
 
-	Sleep(10000); 
-
-	while (true) {
+	while (PSMConnected) {
 		if ((GetAsyncKeyState(VK_ESCAPE) & 0x8000) != 0)
-				break;
+			break;
 		if ((GetAsyncKeyState(VK_NUMPAD3) & 0x8000) != 0)
 			FPS = 30;
 		if ((GetAsyncKeyState(VK_NUMPAD6) & 0x8000) != 0)
@@ -203,8 +191,10 @@ int main()
 		if ((GetAsyncKeyState(VK_NUMPAD1) & 0x8000) != 0)
 			FPS = 1;
 
-		if ((GetAsyncKeyState(VK_F2) & 0x8000) != 0)
+		if ((GetAsyncKeyState(VK_F2) & 0x8000) != 0 && DataRecord == false) {
 			DataRecord = true;
+			InitWriteFile = true;
+		}
 
 		if ((GetAsyncKeyState(VK_F4) & 0x8000) != 0)
 			DataRecord = false;
@@ -216,10 +206,42 @@ int main()
 		{
 			if (ctrl[i]->ControllerState.PSMoveState.MoveButton == PSMButtonState_DOWN)
 				Centering = true;
-			if (ctrl[i]->ControllerState.PSMoveState.CrossButton == PSMButtonState_DOWN)
+
+			if (ctrl[i]->ControllerState.PSMoveState.CrossButton == PSMButtonState_DOWN && DataRecord == false){
 				DataRecord = true;
-			if (ctrl[i]->ControllerState.PSMoveState.CircleButton == PSMButtonState_DOWN)
+				InitWriteFile = true;
+			}
+
+			if (ctrl[i]->ControllerState.PSMoveState.CircleButton == PSMButtonState_DOWN) {
 				DataRecord = false;
+
+			}
+		}
+
+		if (InitWriteFile) {
+			TCHAR FileName[511] = _T("MotionCapture");
+
+
+			TCHAR szTime[31] = { 0 };
+
+			SYSTEMTIME sysTime;
+			GetLocalTime(&sysTime);
+			_stprintf(szTime, _T("_%02d.%02d.%d_%02d-%02d-%02d.txt"), sysTime.wDay, sysTime.wMonth, sysTime.wYear, sysTime.wHour, sysTime.wMinute, sysTime.wSecond);
+
+			_tcscat_s(FileName, sizeof(FileName), szTime);
+
+			MotionCapture.open(FileName);
+			if (MotionCapture.is_open())
+			{
+				MotionCapture << controllerList.count - 1 << std::endl;
+			}
+			InitWriteFile = false;
+			AllowCloseFile = true;
+		}
+
+		if (DataRecord == false && AllowCloseFile) {
+			AllowCloseFile = false;
+			MotionCapture.close();
 		}
 	}
 
@@ -239,9 +261,9 @@ int main()
 
 		PSM_Shutdown();
 	}
-	MotionCapture.close();
 
-	system("cls");
+	if (PSMConnected) 
+		system("cls");
 
 	printf("\r\n r57zone\r\n www.r57zone.github.io\r\n");
 
